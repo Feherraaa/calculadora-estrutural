@@ -10,6 +10,7 @@ st.set_page_config(page_title="Plataforma Avançada de Engenharia Estrutural", l
 # FUNÇÕES DE ENGENHARIA E OTIMIZAÇÃO
 # ==========================================
 def otimizar_bitola(As_req, bw, min_barras=2):
+    """Busca a combinação de barras comerciais com menor desperdício de aço"""
     bitolas = [8.0, 10.0, 12.5, 16.0, 20.0, 25.0]
     melhor_opcao = None
     menor_excesso = float('inf')
@@ -21,6 +22,13 @@ def otimizar_bitola(As_req, bw, min_barras=2):
             menor_excesso = area_total - As_req
             melhor_opcao = (num_barras, phi, area_total)
     return melhor_opcao
+
+def calc_Mcr(L, E, G, Iy, J, Cw, Cb=1.0):
+    """Calcula o Momento Crítico Elástico de Flambagem Lateral com Torção"""
+    if L <= 0: return float('inf')
+    term1 = (math.pi**2 * E * Iy) / (L**2)
+    term2 = (Cw / Iy) + (L**2 * G * J) / (math.pi**2 * E * Iy)
+    return Cb * term1 * math.sqrt(term2)
 
 # ==========================================
 # FUNÇÕES GRÁFICAS DE COMPORTAMENTO MECÂNICO
@@ -115,6 +123,24 @@ def plot_secao_T(bf, bw, h, hf, d, x_ln):
     ax.set_xlim(-bf/2 - 5, bf/2 + 5); ax.set_ylim(-5, h + 5); ax.set_aspect('equal'); ax.axis('off')
     return fig
 
+def plot_secao_mista(d, bf, tw, tf, tc, beff, pna_y):
+    fig, ax = plt.subplots(figsize=(6, 5))
+    ax.add_patch(patches.Rectangle((-tw/2, 0), tw, d, fill=True, color='slategray', label='Perfil de Aço')) 
+    ax.add_patch(patches.Rectangle((-bf/2, 0), bf, tf, fill=True, color='slategray')) 
+    ax.add_patch(patches.Rectangle((-bf/2, d-tf), bf, tf, fill=True, color='slategray')) 
+    ax.add_patch(patches.Rectangle((-beff/2, d), beff, tc, fill=True, color='lightgray', hatch='//', label='Laje'))
+    ax.axhline(pna_y, color='red', linestyle='--', lw=2.5, label=rf'L.N. Plástica (y={pna_y:.1f} cm)')
+    if pna_y > d: 
+        ax.add_patch(patches.Rectangle((-beff/2, pna_y), beff, (d+tc)-pna_y, color='red', alpha=0.2, label='Zona Comprimida'))
+    else: 
+        ax.add_patch(patches.Rectangle((-beff/2, d), beff, tc, color='red', alpha=0.2, label='Zona Comprimida'))
+        ax.add_patch(patches.Rectangle((-bf/2, pna_y), bf, d-pna_y, color='red', alpha=0.2))
+    ax.set_xlim(-beff/2 - 5, beff/2 + 5); ax.set_ylim(-5, d + tc + 5)
+    ax.set_aspect('equal'); ax.axis('off')
+    ax.set_title("Seção Transversal - Viga Mista (Eurocode 4)", fontsize=10)
+    ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.2), ncol=2, fontsize=8)
+    return fig
+
 def plot_laje_ruptura(lx, ly):
     fig, ax = plt.subplots(figsize=(5, 3.5))
     ax.add_patch(patches.Rectangle((0, 0), lx, ly, fill=False, lw=2, color='black'))
@@ -128,34 +154,35 @@ def plot_laje_ruptura(lx, ly):
     ax.set_xlim(-0.5, lx+0.5); ax.set_ylim(-0.5, ly+0.5); ax.axis('off')
     return fig
 
-def plot_secao_mista(d, bf, tw, tf, tc, beff, pna_y):
-    """Gera o desenho da Viga Mista Aço-Concreto com a Linha Neutra Plástica"""
-    fig, ax = plt.subplots(figsize=(6, 5))
+def plot_curva_flt(Lp, Lr, Mpl, Mr, Lb_user, MRd_user, E, G, Iy, J, Cw):
+    L_max = max(Lr * 1.3, Lb_user * 1.2)
+    L_vals = np.linspace(0.1, L_max, 200)
+    M_vals = []
     
-    # Perfil de Aço I
-    ax.add_patch(patches.Rectangle((-tw/2, 0), tw, d, fill=True, color='slategray', label='Perfil de Aço')) # Alma
-    ax.add_patch(patches.Rectangle((-bf/2, 0), bf, tf, fill=True, color='slategray')) # Mesa Inferior
-    ax.add_patch(patches.Rectangle((-bf/2, d-tf), bf, tf, fill=True, color='slategray')) # Mesa Superior
+    for L in L_vals:
+        if L <= Lp:
+            M = Mpl
+        elif L <= Lr:
+            M = Mpl - (Mpl - Mr) * ((L - Lp) / (Lr - Lp))
+        else:
+            M = calc_Mcr(L, E, G, Iy, J, Cw, 1.0)
+        M_vals.append((min(M, Mpl)) / 1.10 / 100)
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(L_vals/100, M_vals, color='darkred', lw=2, label='Curva Resistente NBR 8800')
+    ax.axvline(Lp/100, color='gray', linestyle='--', lw=1, label=rf'$L_p$ ({Lp/100:.2f}m)')
+    ax.axvline(Lr/100, color='gray', linestyle=':', lw=1, label=rf'$L_r$ ({Lr/100:.2f}m)')
     
-    # Laje de Concreto
-    ax.add_patch(patches.Rectangle((-beff/2, d), beff, tc, fill=True, color='lightgray', hatch='//', label='Laje de Concreto Colaborante'))
-    
-    # Linha Neutra Plástica (PNA)
-    ax.axhline(pna_y, color='red', linestyle='--', lw=2.5, label=rf'L.N. Plástica (y={pna_y:.1f} cm)')
-    
-    # Zonas de Compressão/Tração Visuais
-    if pna_y > d: # PNA na laje
-        ax.add_patch(patches.Rectangle((-beff/2, pna_y), beff, (d+tc)-pna_y, color='red', alpha=0.2, label='Zona Comprimida'))
-    else: # PNA no perfil de aço
-        ax.add_patch(patches.Rectangle((-beff/2, d), beff, tc, color='red', alpha=0.2, label='Zona Comprimida'))
-        ax.add_patch(patches.Rectangle((-bf/2, pna_y), bf, d-pna_y, color='red', alpha=0.2))
-        
-    ax.set_xlim(-beff/2 - 5, beff/2 + 5)
-    ax.set_ylim(-5, d + tc + 5)
-    ax.set_aspect('equal')
-    ax.axis('off')
-    ax.set_title("Seção Transversal - Viga Mista (Eurocode 4)", fontsize=10)
-    ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.2), ncol=2, fontsize=8)
+    ax.scatter([Lb_user/100], [MRd_user/100], color='blue', s=100, zorder=5, label='Sua Viga')
+    ax.plot([0, Lb_user/100], [MRd_user/100, MRd_user/100], color='blue', linestyle='-.', lw=1)
+    ax.plot([Lb_user/100, Lb_user/100], [0, MRd_user/100], color='blue', linestyle='-.', lw=1)
+
+    ax.set_title("Análise de Flambagem Lateral com Torção (FLT)", fontsize=10)
+    ax.set_xlabel("Comprimento Destravado Lb (m)")
+    ax.set_ylabel("Momento de Projeto MRd (kN.m)")
+    ax.set_ylim(bottom=0)
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8)
     return fig
 
 # ==========================================
@@ -251,95 +278,6 @@ def modulo_pilares():
             else: st.success(rf"✅ Adotar: **{num_b} barras de $\phi$ {phi_b} mm** (Área: {a_real:.2f} cm²)")
             st.pyplot(plot_pilar_detalhe(formato, b, h_p, num_b))
 
-def modulo_metalicas_mistas():
-    st.header("Módulo 5: Estruturas Metálicas e Vigas Mistas")
-    st.markdown("---")
-    st.info("💡 **Referências Normativas:** ABNT NBR 8800, NBR 5884, Manuais CBCA e Eurocode 4.")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Geometria do Perfil de Aço (Catálogo)")
-        tipo_perfil = st.selectbox("Tipo de Perfil", ["Perfil I Laminado/Soldado", "Perfil U Laminado"])
-        d_aco = st.number_input("Altura do Perfil d (cm)", min_value=5.0, value=25.0)
-        bf_aco = st.number_input("Largura da Mesa bf (cm)", min_value=5.0, value=12.5)
-        tw_aco = st.number_input("Espessura da Alma tw (mm)", min_value=2.0, value=6.3) / 10 # Convertido para cm
-        tf_aco = st.number_input("Espessura da Mesa tf (mm)", min_value=2.0, value=9.5) / 10 # Convertido para cm
-        
-        aco_fy = st.selectbox("Tensão de Escoamento do Aço fy", ["ASTM A36 (250 MPa)", "ASTM A572 (345 MPa)"])
-        fy = 25.0 if "250" in aco_fy else 34.5 # kN/cm²
-        
-        st.subheader("Integração com Laje de Concreto (Viga Mista)")
-        viga_mista = st.checkbox("Considerar trabalho conjunto com a Laje (Viga Mista)?")
-        
-        if viga_mista:
-            tc_concreto = st.number_input("Espessura da Laje tc (cm)", min_value=5.0, value=10.0)
-            beff_concreto = st.number_input("Largura Efetiva da Laje beff (cm)", min_value=30.0, value=150.0)
-            fck_misto = st.number_input("fck do Concreto da Laje (MPa)", min_value=20.0, value=25.0)
-
-    with col2:
-        st.subheader("Propriedades e Momentos Resistentes")
-        if st.button("Calcular Resistência Metálica / Mista"):
-            # 1. Propriedades Geométricas do Perfil de Aço Nu
-            Area_aco = 2 * (bf_aco * tf_aco) + (d_aco - 2*tf_aco) * tw_aco
-            
-            st.write(rf"- Área da Seção de Aço ($A_a$): **{Area_aco:.2f} cm²**")
-            
-            # Resistência à Tração / Compressão do perfil
-            Rs = Area_aco * (fy / 1.10) # kN (Força plástica do aço)
-            
-            if not viga_mista:
-                # Perfil Isolado (Apenas Aço)
-                # Cálculo do Módulo Plástico Zx (Simplificado para Perfil I simétrico)
-                Zx = (bf_aco * tf_aco) * (d_aco - tf_aco) + (tw_aco * (d_aco - 2*tf_aco)**2) / 4
-                Mpl_Rd = (Zx * fy) / 1.10 # kN.cm
-                
-                st.success(rf"Momento Fletor Plástico Resistente ($M_{{pl,Rd}}$): **{Mpl_Rd/100:.2f} kN.m**")
-                st.caption("Nota: Cálculo base para perfil 100% contido lateralmente (sem flambagem lateral com torção - FLT).")
-                
-            else:
-                # Viga Mista (Aço + Concreto) - Análise Plástica (Eurocode 4 / CBCA)
-                fcd = (fck_misto / 1.4) / 10 # kN/cm²
-                
-                # Capacidade Máxima de Compressão da Laje
-                Rc = 0.85 * fcd * beff_concreto * tc_concreto # kN
-                
-                st.write(rf"- Força Plástica do Aço ($R_s$): **{Rs:.2f} kN**")
-                st.write(rf"- Capacidade da Laje de Concreto ($R_c$): **{Rc:.2f} kN**")
-                
-                # Posição da Linha Neutra Plástica (PNA)
-                if Rc >= Rs:
-                    # Linha neutra está dentro da laje de concreto
-                    a_comp = Rs / (0.85 * fcd * beff_concreto) # Profundidade comprimida do concreto
-                    pna_y = d_aco + tc_concreto - a_comp # Y a partir da base do perfil
-                    
-                    z = (d_aco / 2) + tc_concreto - (a_comp / 2) # Braço de alavanca
-                    M_misto_Rd = Rs * z # kN.cm
-                    
-                    st.info("PNA (Linha Neutra Plástica) localizada na **Laje de Concreto**.")
-                else:
-                    # Linha neutra está no perfil de aço (Laje 100% comprimida)
-                    # Força que precisa ser equilibrada pelo aço comprimido
-                    Ra_comp = (Rs - Rc) / 2
-                    
-                    # Verifica se o PNA está na mesa superior do aço ou na alma
-                    R_mesa_sup = (bf_aco * tf_aco) * (fy / 1.10)
-                    if Ra_comp <= R_mesa_sup:
-                        st.info("PNA (Linha Neutra Plástica) localizada na **Mesa Superior de Aço**.")
-                        y_pna_from_top = Ra_comp / (bf_aco * (fy/1.10))
-                        pna_y = d_aco - y_pna_from_top
-                    else:
-                        st.info("PNA (Linha Neutra Plástica) localizada na **Alma de Aço**.")
-                        R_alma = Ra_comp - R_mesa_sup
-                        y_alma_from_top = R_alma / (tw_aco * (fy/1.10))
-                        pna_y = d_aco - tf_aco - y_alma_from_top
-                        
-                    # Para simplificação robusta na calculadora, usamos limite conservador de momento misto
-                    z_approx = (d_aco / 2) + (tc_concreto / 2)
-                    M_misto_Rd = Rc * z_approx + (Rs - Rc) * (d_aco/4) # Estimativa segura
-                    
-                st.success(rf"Momento Plástico Resistente da Viga Mista ($M_{{pl,Rd}}$): **{M_misto_Rd/100:.2f} kN.m**")
-                st.pyplot(plot_secao_mista(d_aco, bf_aco, tw_aco, tf_aco, tc_concreto, beff_concreto, pna_y))
-
 def modulo_lajes():
     st.header("Módulo 3: Lajes Maciças")
     st.markdown("---")
@@ -384,6 +322,185 @@ def modulo_laje_trelicada():
                 st.success(rf"Armadura por Vigota Requerida: **{As:.2f} cm²**")
                 st.pyplot(plot_secao_T(bf, bw, h, hf, d, x))
 
+def modulo_metalicas_mistas():
+    st.header("Módulo 5: Estruturas Metálicas e Vigas Mistas (FLT)")
+    st.markdown("---")
+    st.info("💡 **Referências:** NBR 8800, Eurocode 4 e Manuais CBCA.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        tipo_perfil = st.selectbox("Tipo de Perfil", ["Perfil I Laminado/Soldado", "Perfil U Laminado"])
+        d_aco = st.number_input("Altura do Perfil d (cm)", min_value=5.0, value=25.0)
+        bf_aco = st.number_input("Largura da Mesa bf (cm)", min_value=5.0, value=12.5)
+        tw_aco = st.number_input("Espessura da Alma tw (mm)", min_value=2.0, value=6.3) / 10 
+        tf_aco = st.number_input("Espessura da Mesa tf (mm)", min_value=2.0, value=9.5) / 10 
+        
+        aco_fy = st.selectbox("Tensão de Escoamento fy", ["ASTM A36 (250 MPa)", "ASTM A572 (345 MPa)"])
+        fy = 25.0 if "250" in aco_fy else 34.5
+        
+        viga_mista = st.checkbox("Considerar Laje de Concreto (Viga Mista)?")
+        
+        if viga_mista:
+            tc_concreto = st.number_input("Espessura da Laje tc (cm)", min_value=5.0, value=10.0)
+            beff_concreto = st.number_input("Largura Efetiva beff (cm)", min_value=30.0, value=150.0)
+            fck_misto = st.number_input("fck da Laje (MPa)", min_value=20.0, value=25.0)
+        else:
+            contida = st.radio("Contenção Lateral (FLT):", ["100% Contida Lateralmente", "Comprimento Destravado (Sujeito a FLT)"])
+            if "Destravado" in contida:
+                Lb_m = st.number_input("Distância entre travamentos Lb (m)", min_value=0.1, value=3.0)
+                Lb = Lb_m * 100 
+            else:
+                Lb = 0.0
+
+    with col2:
+        if st.button("Calcular Resistência do Aço"):
+            Area = 2 * (bf_aco * tf_aco) + (d_aco - 2*tf_aco) * tw_aco
+            h0 = d_aco - tf_aco 
+            Iy = 2 * (tf_aco * bf_aco**3)/12 + ((d_aco - 2*tf_aco) * tw_aco**3)/12
+            Ix = (bf_aco * d_aco**3)/12 - ((bf_aco - tw_aco) * (d_aco - 2*tf_aco)**3)/12
+            Wx = Ix / (d_aco/2)
+            Zx = bf_aco * tf_aco * h0 + (tw_aco * (d_aco - 2*tf_aco)**2)/4
+            J = (2 * bf_aco * tf_aco**3 + (d_aco - 2*tf_aco) * tw_aco**3)/3
+            Cw = (Iy * h0**2)/4 
+            ry = math.sqrt(Iy / Area)
+            Rs = Area * (fy / 1.10)
+            
+            if viga_mista:
+                fcd = (fck_misto / 1.4) / 10
+                Rc = 0.85 * fcd * beff_concreto * tc_concreto
+                if Rc >= Rs:
+                    a_comp = Rs / (0.85 * fcd * beff_concreto)
+                    pna_y = d_aco + tc_concreto - a_comp
+                    M_misto_Rd = Rs * ((d_aco / 2) + tc_concreto - (a_comp / 2))
+                    st.info("Linha Neutra Plástica na **Laje de Concreto**.")
+                else:
+                    Ra_comp = (Rs - Rc) / 2
+                    R_mesa_sup = (bf_aco * tf_aco) * (fy / 1.10)
+                    if Ra_comp <= R_mesa_sup:
+                        pna_y = d_aco - (Ra_comp / (bf_aco * (fy/1.10)))
+                        st.info("Linha Neutra Plástica na **Mesa Superior de Aço**.")
+                    else:
+                        pna_y = d_aco - tf_aco - ((Ra_comp - R_mesa_sup) / (tw_aco * (fy/1.10)))
+                        st.info("Linha Neutra Plástica na **Alma de Aço**.")
+                    z_approx = (d_aco / 2) + (tc_concreto / 2)
+                    M_misto_Rd = Rc * z_approx + (Rs - Rc) * (d_aco/4)
+                st.success(rf"Momento Plástico Viga Mista ($M_{{pl,Rd}}$): **{M_misto_Rd/100:.2f} kN.m**")
+                st.pyplot(plot_secao_mista(d_aco, bf_aco, tw_aco, tf_aco, tc_concreto, beff_concreto, pna_y))
+            else:
+                E = 20000.0 
+                G = 7700.0 
+                Mpl = Zx * fy
+                Mr = 0.7 * fy * Wx
+                Lp = 1.76 * ry * math.sqrt(E / fy)
+                st.write(rf"- Área da Seção: **{Area:.2f} cm²** | Inércia Iy: **{Iy:.2f} cm⁴**")
+                if Lb <= 0:
+                    st.success(rf"Momento Plástico Base 100% Contido ($M_{{pl,Rd}}$): **{Mpl/1.10/100:.2f} kN.m**")
+                else:
+                    L_low = Lp
+                    L_high = 20000.0
+                    for _ in range(40):
+                        L_mid = (L_low + L_high)/2
+                        if calc_Mcr(L_mid, E, G, Iy, J, Cw, 1.0) > Mr: L_low = L_mid
+                        else: L_high = L_mid
+                    Lr = (L_low + L_high)/2
+                    Mcr = calc_Mcr(Lb, E, G, Iy, J, Cw, 1.0) 
+                    
+                    if Lb <= Lp:
+                        Mk = Mpl
+                        fenomeno = "Escoamento Plástico (Sem FLT)"
+                    elif Lb <= Lr:
+                        Mk = Mpl - (Mpl - Mr) * ((Lb - Lp) / (Lr - Lp))
+                        Mk = min(Mk, Mpl)
+                        fenomeno = "FLT Inelástica"
+                    else:
+                        Mk = min(Mcr, Mpl)
+                        fenomeno = "FLT Elástica"
+                        
+                    MRd = Mk / 1.10
+                    st.markdown("### 🌀 Verificação de Flambagem Lateral com Torção (FLT)")
+                    st.write(rf"- Limites: $L_p$ = **{Lp/100:.2f} m** |  $L_r$ = **{Lr/100:.2f} m**")
+                    st.write(rf"- Comportamento: **{fenomeno}**")
+                    if Lb > Lp: st.warning(rf"⚠️ Queda de resistência devido à flambagem.")
+                    st.success(rf"Momento Resistente de Projeto ($M_{{Rd}}$): **{MRd/100:.2f} kN.m**")
+                    st.pyplot(plot_curva_flt(Lp, Lr, Mpl, Mr, Lb, MRd, E, G, Iy, J, Cw))
+
+def modulo_materiais():
+    st.header("Módulo 6: Dimensionamento de Materiais para Obra")
+    st.markdown("---")
+    st.info("Levantamentos baseados em métricas práticas de canteiro de obras e engenharias.")
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🧱 Tijolos", "🏗️ Concreto", "🪣 Argamassas", "⛓️ Aço", "💧 Impermeabilização"])
+
+    with tab1:
+        st.subheader("Cálculo de Alvenaria (Tijolos 9x19x19)")
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            comp_parede = st.number_input("Comprimento Total (m)", min_value=0.0, value=10.0)
+            alt_parede = st.number_input("Altura das Paredes (m)", min_value=0.0, value=2.8)
+            area_vaos = st.number_input("Área de Vãos (m²)", min_value=0.0, value=4.0)
+            tipo_assentamento = st.radio("Assentamento:", ["Meia Vez (em pé)", "Uma Vez (deitado)"])
+        with col_t2:
+            if st.button("Calcular Tijolos"):
+                area_liquida = (comp_parede * alt_parede) - area_vaos
+                area_com_perda = area_liquida * 1.10
+                consumo_m2 = 28 if "Meia" in tipo_assentamento else 55
+                total_tijolos = math.ceil(area_com_perda * consumo_m2)
+                st.write(rf"- Área com Margem (10%): **{area_com_perda:.2f} m²**")
+                st.success(rf"Total Recomendado: **{total_tijolos} tijolos**")
+
+    with tab2:
+        st.subheader("Cálculo de Volume de Concreto")
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            comp_conc = st.number_input("Comprimento (m)", min_value=0.0, value=5.0)
+            larg_conc = st.number_input("Largura (m)", min_value=0.0, value=4.0)
+            esp_conc = st.number_input("Espessura (m)", min_value=0.0, value=0.10)
+            tipo_concreto = st.radio("Preparo:", ["Usinado", "Virado na Obra"])
+        with col_c2:
+            if st.button("Calcular Concreto"):
+                volume_m3 = comp_conc * larg_conc * esp_conc
+                if "Usinado" in tipo_concreto:
+                    st.success(rf"Volume na Concreteira (+5%): **{volume_m3 * 1.05:.2f} m³**")
+                else:
+                    st.success(f"Cimento: **{math.ceil(volume_m3 * 7)} sacos**\n\nAreia: **{volume_m3 * 0.5:.2f} m³**\n\nBrita: **{volume_m3 * 0.8:.2f} m³**")
+
+    with tab3:
+        st.subheader("Cálculo de Argamassas")
+        col_a1, col_a2 = st.columns(2)
+        with col_a1:
+            area_argamassa = st.number_input("Área (m²)", min_value=0.0, value=50.0)
+            tipo_arg = st.selectbox("Finalidade", ["Assentamento de Tijolos", "Chapisco", "Reboco"])
+        with col_a2:
+            if st.button("Calcular Argamassa"):
+                if tipo_arg == "Assentamento de Tijolos":
+                    massa_pronta = area_argamassa * 18
+                    st.success(rf"Argamassa: **{massa_pronta:.1f} kg** ({math.ceil(massa_pronta/20)} sacos 20kg)")
+                elif tipo_arg == "Chapisco":
+                    st.success(rf"Cimento: **{math.ceil(area_argamassa / 30)} sacos**")
+                else:
+                    st.success(rf"Volume para Reboco 2cm: **{area_argamassa * 0.02:.2f} m³**")
+
+    with tab4:
+        st.subheader("Estimativa de Aço")
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            vol_concreto_aco = st.number_input("Volume Concreto Obra (m³)", min_value=0.0, value=15.0)
+            taxa_aco = st.slider("Taxa Aço (kg/m³)", 60, 120, 90)
+        with col_s2:
+            if st.button("Estimar Aço"):
+                st.success(rf"Peso Estimado de Aço: **{vol_concreto_aco * taxa_aco:.1f} kg**")
+
+    with tab5:
+        st.subheader("Isolamentos")
+        col_i1, col_i2 = st.columns(2)
+        with col_i1:
+            area_piso = st.number_input("Área Contrapiso (m²)", min_value=0.0, value=80.0)
+            comp_baldrame = st.number_input("Metragem Baldrame (m)", min_value=0.0, value=45.0)
+        with col_i2:
+            if st.button("Calcular Isolamentos"):
+                st.success(rf"Lona Preta (Piso +20%): **{area_piso * 1.20:.2f} m²**")
+                st.success(rf"Produto Impermeabilizante: **{(comp_baldrame * 0.15) * 1.5:.1f} kg/L**")
+
 # ==========================================
 # MENU LATERAL E NAVEGAÇÃO
 # ==========================================
@@ -394,7 +511,8 @@ modulo = st.sidebar.radio("Selecione o Componente:", [
     "2. Pilares CA (Variantes)", 
     "3. Lajes Maciças", 
     "4. Lajes Treliçadas",
-    "5. Metálicas e Vigas Mistas"
+    "5. Metálicas e Vigas Mistas",
+    "6. Materiais (Quantitativos)"
 ])
 
 if "0." in modulo: modulo_cargas()
@@ -402,4 +520,5 @@ elif "1." in modulo: modulo_vigas()
 elif "2." in modulo: modulo_pilares()
 elif "3." in modulo: modulo_lajes()
 elif "4." in modulo: modulo_laje_trelicada()
-else: modulo_metalicas_mistas()
+elif "5." in modulo: modulo_metalicas_mistas()
+else: modulo_materiais()
