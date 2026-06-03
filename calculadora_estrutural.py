@@ -1,621 +1,446 @@
-import streamlit as st
-import math
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import numpy as np
-import pandas as pd
-
-st.set_page_config(page_title="Plataforma Avançada de Engenharia Estrutural", layout="wide")
-
-# ==========================================
-# FUNÇÕES DE ENGENHARIA E OTIMIZAÇÃO (Módulos 1 a 5)
-# ==========================================
-def otimizar_bitola(As_req, bw, min_barras=2):
-    bitolas = [8.0, 10.0, 12.5, 16.0, 20.0, 25.0]
-    melhor_opcao = None
-    menor_excesso = float('inf')
-    for phi in bitolas:
-        area_barra = (math.pi * (phi/10)**2) / 4
-        num_barras = max(min_barras, math.ceil(As_req / area_barra))
-        area_total = num_barras * area_barra
-        if area_total >= As_req and (area_total - As_req) < menor_excesso:
-            menor_excesso = area_total - As_req
-            melhor_opcao = (num_barras, phi, area_total)
-    return melhor_opcao
-
-def calc_Mcr(L, E, G, Iy, J, Cw, Cb=1.0):
-    if L <= 0: return float('inf')
-    term1 = (math.pi**2 * E * Iy) / (L**2)
-    term2 = (Cw / Iy) + (L**2 * G * J) / (math.pi**2 * E * Iy)
-    return Cb * term1 * math.sqrt(term2)
-
-# ==========================================
-# FUNÇÕES GRÁFICAS DE COMPORTAMENTO MECÂNICO
-# ==========================================
-def plot_viga_esforcos(L, q):
-    x = np.linspace(0, L, 200)
-    V = q * (L / 2 - x)
-    M = (q * x / 2) * (L - x)
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 4))
-    ax1.plot(x, V, color='teal', lw=2)
-    ax1.fill_between(x, V, color='teal', alpha=0.1)
-    ax1.axhline(0, color='black', lw=0.8)
-    ax1.set_title("Diagrama de Força Cortante - DEC (kN)", fontsize=9)
-    ax1.grid(True, linestyle=':', alpha=0.6)
-    ax2.plot(x, M, color='crimson', lw=2)
-    ax2.fill_between(x, M, color='crimson', alpha=0.1)
-    ax2.axhline(0, color='black', lw=0.8)
-    ax2.set_title("Diagrama de Momento Fletor - DMF (kN.m)", fontsize=9)
-    ax2.invert_yaxis()
-    ax2.grid(True, linestyle=':', alpha=0.6)
-    plt.tight_layout()
-    return fig
-
-def plot_viga_dominios(bw, h, d, x_ln, As_sup_req):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3.5), gridspec_kw={'width_ratios': [1, 1.5]})
-    ax1.add_patch(patches.Rectangle((0, 0), bw, h, fill=False, lw=2, color='black'))
-    ax1.axhline(h - x_ln, color='red', linestyle='--', label='L.N.')
-    ax1.add_patch(patches.Rectangle((0, h - 0.8*x_ln), bw, 0.8*x_ln, color='red', alpha=0.2))
-    ax1.scatter([bw*0.25, bw*0.5, bw*0.75], [h - d, h - d, h - d], color='blue', s=80, label='As (Tração)')
-    if As_sup_req > 0:
-        ax1.scatter([bw*0.25, bw*0.75], [h - (h-d), h - (h-d)], color='orange', s=80, label="As' (Compressão)")
-    ax1.set_xlim(-5, bw+5); ax1.set_ylim(-5, h+5); ax1.axis('off'); ax1.legend(loc='lower center', fontsize=7)
-    
-    ax2.plot([0, 0], [0, h], color='black', lw=1.5)
-    ax2.axhline(h - x_ln, color='red', linestyle='--')
-    x_d = x_ln / d
-    eps_s = 10.0 if x_d <= 0.259 else (3.5 * (d - x_ln)) / x_ln
-    eps_c = (x_ln * 10.0) / (d - x_ln) if x_d <= 0.259 else 3.5
-    ax2.plot([-eps_c, eps_s], [h, h - d], color='purple', lw=2, marker='o')
-    ax2.set_title("Deformações da Seção", fontsize=9)
-    ax2.grid(True, linestyle='--', alpha=0.5)
-    plt.tight_layout()
-    return fig
-
-def plot_viga_elevacao(L, h, tem_armadura_dupla):
-    L_cm = L * 100
-    fig, ax = plt.subplots(figsize=(10, 2))
-    ax.add_patch(patches.Rectangle((0, 0), L_cm, h, fill=False, lw=2, color='gray'))
-    c = 3.0
-    ax.plot([c, L_cm-c], [c, c], color='blue', lw=3.5, label='Inferior (Tração)')
-    if tem_armadura_dupla: ax.plot([c, L_cm-c], [h-c, h-c], color='orange', lw=3.5, label='Superior (Estrutural)')
-    else: ax.plot([c, L_cm-c], [h-c, h-c], color='blue', lw=1.5, linestyle='--', label='Superior (Porta-Estribo)')
-    for x in np.arange(c, L_cm-c, max(15.0, L_cm / 30)): ax.plot([x, x], [c, h-c], color='darkred', lw=1.2)
-    ax.set_xlim(-10, L_cm + 10); ax.set_ylim(-10, h + 10); ax.set_aspect('equal'); ax.axis('off')
-    ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.5), ncol=3, fontsize=8)
-    return fig
-
-def plot_pilar_detalhe(formato, b, h, num_barras):
-    fig, ax = plt.subplots(figsize=(4, 4))
-    if formato == "Retangular":
-        ax.add_patch(patches.Rectangle((0, 0), b, h, fill=False, lw=3, color='grey'))
-        ax.add_patch(patches.Rectangle((2.5, 2.5), b-5, h-5, fill=False, lw=1.5, color='darkred'))
-        if num_barras == 4: xs, ys = [3.5, b-3.5, 3.5, b-3.5], [3.5, 3.5, h-3.5, h-3.5]
-        else:
-            xs = [3.5, b-3.5, 3.5, b-3.5, 3.5, b-3.5]
-            ys = [3.5, 3.5, h-3.5, h-3.5, h/2, h/2] if h >= b else [3.5, 3.5, h-3.5, h-3.5, b/2, b/2]
-        ax.scatter(xs, ys, color='black', s=120, zorder=3)
-        ax.set_xlim(-5, b+5); ax.set_ylim(-5, h+5)
-    else:
-        raio = b / 2
-        ax.add_patch(patches.Circle((raio, raio), raio, fill=False, lw=3, color='grey'))
-        ax.add_patch(patches.Circle((raio, raio), raio - 2.5, fill=False, lw=1.5, color='darkred'))
-        angulos = np.linspace(0, 2*np.pi, num_barras, endpoint=False)
-        xs = raio + (raio - 3.5) * np.cos(angulos)
-        ys = raio + (raio - 3.5) * np.sin(angulos)
-        ax.scatter(xs, ys, color='black', s=120, zorder=3)
-        ax.set_xlim(-5, b+5); ax.set_ylim(-5, b+5)
-    ax.set_aspect('equal'); ax.axis('off')
-    return fig
-
-def plot_secao_T(bf, bw, h, hf, d, x_ln):
-    fig, ax = plt.subplots(figsize=(4, 4))
-    ax.add_patch(patches.Rectangle((-bw/2, 0), bw, h - hf, fill=False, lw=2, color='black'))
-    ax.add_patch(patches.Rectangle((-bf/2, h - hf), bf, hf, fill=False, lw=2, color='black'))
-    ax.axhline(h - x_ln, color='red', linestyle='--')
-    y_comp = 0.8 * x_ln
-    if y_comp <= hf: ax.add_patch(patches.Rectangle((-bf/2, h - y_comp), bf, y_comp, color='red', alpha=0.3))
-    else:
-        ax.add_patch(patches.Rectangle((-bf/2, h - hf), bf, hf, color='red', alpha=0.3))
-        ax.add_patch(patches.Rectangle((-bw/2, h - y_comp), bw, y_comp - hf, color='red', alpha=0.3))
-    ax.scatter([-bw/4, bw/4], [h - d, h - d], color='blue', s=80)
-    ax.set_xlim(-bf/2 - 5, bf/2 + 5); ax.set_ylim(-5, h + 5); ax.set_aspect('equal'); ax.axis('off')
-    return fig
-
-def plot_secao_mista(d, bf, tw, tf, tc, beff, pna_y):
-    fig, ax = plt.subplots(figsize=(6, 5))
-    ax.add_patch(patches.Rectangle((-tw/2, 0), tw, d, fill=True, color='slategray', label='Perfil de Aço')) 
-    ax.add_patch(patches.Rectangle((-bf/2, 0), bf, tf, fill=True, color='slategray')) 
-    ax.add_patch(patches.Rectangle((-bf/2, d-tf), bf, tf, fill=True, color='slategray')) 
-    ax.add_patch(patches.Rectangle((-beff/2, d), beff, tc, fill=True, color='lightgray', hatch='//', label='Laje'))
-    ax.axhline(pna_y, color='red', linestyle='--', lw=2.5, label=rf'L.N. Plástica (y={pna_y:.1f} cm)')
-    if pna_y > d: 
-        ax.add_patch(patches.Rectangle((-beff/2, pna_y), beff, (d+tc)-pna_y, color='red', alpha=0.2, label='Zona Comprimida'))
-    else: 
-        ax.add_patch(patches.Rectangle((-beff/2, d), beff, tc, color='red', alpha=0.2, label='Zona Comprimida'))
-        ax.add_patch(patches.Rectangle((-bf/2, pna_y), bf, d-pna_y, color='red', alpha=0.2))
-    ax.set_xlim(-beff/2 - 5, beff/2 + 5); ax.set_ylim(-5, d + tc + 5)
-    ax.set_aspect('equal'); ax.axis('off')
-    ax.set_title("Seção Transversal - Viga Mista", fontsize=10)
-    ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.2), ncol=2, fontsize=8)
-    return fig
-
-def plot_laje_ruptura(lx, ly):
-    fig, ax = plt.subplots(figsize=(5, 3.5))
-    ax.add_patch(patches.Rectangle((0, 0), lx, ly, fill=False, lw=2, color='black'))
-    if lx <= ly: x1, y1, x2, y2 = lx/2, lx/2, lx/2, ly - lx/2
-    else: x1, y1, x2, y2 = ly/2, ly/2, lx - ly/2, ly/2
-    ax.plot([0, x1], [0, y1], color='orange', lw=2, linestyle='--')
-    ax.plot([lx, x1], [0, y1], color='orange', lw=2, linestyle='--')
-    ax.plot([0, x2], [ly, y2], color='orange', lw=2, linestyle='--')
-    ax.plot([lx, x2], [ly, y2], color='orange', lw=2, linestyle='--')
-    ax.plot([x1, x2], [y1, y2], color='orange', lw=2, linestyle='--')
-    ax.set_xlim(-0.5, lx+0.5); ax.set_ylim(-0.5, ly+0.5); ax.axis('off')
-    return fig
-
-def plot_curva_flt(Lp, Lr, Mpl, Mr, Lb_user, MRd_user, E, G, Iy, J, Cw):
-    L_max = max(Lr * 1.3, Lb_user * 1.2)
-    L_vals = np.linspace(0.1, L_max, 200)
-    M_vals = []
-    for L in L_vals:
-        if L <= Lp: M = Mpl
-        elif L <= Lr: M = Mpl - (Mpl - Mr) * ((L - Lp) / (Lr - Lp))
-        else: M = calc_Mcr(L, E, G, Iy, J, Cw, 1.0)
-        M_vals.append((min(M, Mpl)) / 1.10 / 100)
-
-    fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(L_vals/100, M_vals, color='darkred', lw=2, label='Curva Resistente NBR 8800')
-    ax.axvline(Lp/100, color='gray', linestyle='--', lw=1, label=rf'$L_p$ ({Lp/100:.2f}m)')
-    ax.axvline(Lr/100, color='gray', linestyle=':', lw=1, label=rf'$L_r$ ({Lr/100:.2f}m)')
-    ax.scatter([Lb_user/100], [MRd_user/100], color='blue', s=100, zorder=5, label='Sua Viga')
-    ax.plot([0, Lb_user/100], [MRd_user/100, MRd_user/100], color='blue', linestyle='-.', lw=1)
-    ax.plot([Lb_user/100, Lb_user/100], [0, MRd_user/100], color='blue', linestyle='-.', lw=1)
-    ax.set_title("Análise de Flambagem Lateral com Torção (FLT)", fontsize=10)
-    ax.set_xlabel("Comprimento Destravado Lb (m)")
-    ax.set_ylabel("Momento de Projeto MRd (kN.m)")
-    ax.set_ylim(bottom=0)
-    ax.grid(True, alpha=0.3)
-    ax.legend(fontsize=8)
-    return fig
-
-# ==========================================
-# MÓDULOS DE INTERFACE E CÁLCULO (0 a 5)
-# ==========================================
-def modulo_cargas():
-    st.header("Módulo 0: Estimativa e Descida de Cargas (NBR 6120)")
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        area_planta = st.number_input("Área da Planta por Pavimento (m²)", min_value=10.0, value=100.0)
-        uso = st.selectbox("Tipo de Uso", ["Residencial", "Comercial / Escritórios", "Garagem"])
-        num_pilares = st.number_input("Quantidade estimada de Pilares", min_value=4, value=8)
-        pavimentos_tipo = st.radio("Tipologia da Edificação:", ["Térrea (1 Laje)", "Sobrado / Prédio (Múltiplos Andares)"])
-        andares = st.number_input("Número de Lajes Total", min_value=2, value=2) if "Sobrado" in pavimentos_tipo else 1
-
-    with col2:
-        if st.button("Gerar Descida de Cargas"):
-            carga_acidental = 1.5 if uso == "Residencial" else (2.5 if "Comercial" in uso else 3.0)
-            carga_total_m2 = 5.5 + carga_acidental
-            total_edificacao = area_planta * carga_total_m2 * andares
-            carga_pilar_media = (total_edificacao / num_pilares) * 1.15
-            st.metric("Peso Total Estimado da Obra", f"{total_edificacao:.1f} kN")
-            st.success(rf"Carga Axial de Serviço Recomendada ($N_k$): **{carga_pilar_media:.2f} kN**")
-
-def modulo_vigas():
-    st.header("Módulo 1: Vigas CA - Flexão Inteligente e Detalhamento")
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        L = st.number_input("Vão da Viga L (m)", min_value=1.0, value=5.0)
-        q_reg = st.number_input("Carga Total Distribuída q (kN/m)", min_value=1.0, value=20.0)
-        bw = st.number_input("Largura bw (cm)", min_value=10.0, value=15.0)
-        h = st.number_input("Altura h (cm)", min_value=20.0, value=45.0)
-        fck = st.number_input("fck do Concreto (MPa)", min_value=20.0, value=25.0)
-
-    with col2:
-        if st.button("Calcular Estrutura da Viga"):
-            q_d = q_reg * 1.4
-            M_sd = (q_d * (L**2)) / 8
-            d = h - 4.0
-            fcd = (fck / 1.4) / 10
-            fyd = (500 / 1.15) / 10
-            M_sd_cm = M_sd * 100
-            
-            x_lim = 0.45 * d
-            M_lim = 0.68 * bw * x_lim * fcd * (d - 0.4 * x_lim)
-            tem_dupla = M_sd_cm > M_lim
-            
-            if not tem_dupla:
-                a_eq = 0.272 * bw * fcd
-                b_eq = -0.68 * bw * fcd * d
-                delta = b_eq**2 - 4 * a_eq * M_sd_cm
-                x_ln = (-b_eq - math.sqrt(delta)) / (2 * a_eq)
-                As_inf = max(M_sd_cm / (fyd * (d - 0.4 * x_ln)), (0.15/100)*bw*h)
-                As_sup = 0
-            else:
-                x_ln = x_lim
-                As_inf = (M_lim / (fyd * (d - 0.4 * x_lim))) + ((M_sd_cm - M_lim) / (fyd * (d - 4.0)))
-                As_sup = (M_sd_cm - M_lim) / (fyd * (d - 4.0))
-            
-            num_inf, phi_inf, a_inf = otimizar_bitola(As_inf, bw)
-            st.success(rf"Aço Inferior (Tração): **{num_inf} barras de $\phi$ {phi_inf} mm**")
-            if tem_dupla:
-                num_sup, phi_sup, a_sup = otimizar_bitola(As_sup, bw, min_barras=2)
-                st.warning(rf"🚨 Armadura Dupla Requerida! Aço Superior: **{num_sup} barras de $\phi$ {phi_sup} mm**")
-            
-            st.pyplot(plot_viga_esforcos(L, q_d))
-            st.pyplot(plot_viga_dominios(bw, h, d, x_ln, As_sup))
-            st.pyplot(plot_viga_elevacao(L, h, tem_dupla))
-
-def modulo_pilares():
-    st.header("Módulo 2: Pilares CA - Variantes Geométricas")
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        formato = st.selectbox("Formato da Seção", ["Retangular", "Circular"])
-        b = st.number_input("Dimensão/Diâmetro (cm)", min_value=14.0, value=20.0)
-        h_p = st.number_input("Comprimento (cm)", min_value=14.0, value=30.0) if formato == "Retangular" else b
-        N_k = st.number_input("Força Normal Nk (kN)", min_value=10.0, value=500.0)
-        num_barras = st.selectbox("Quantidade de Barras", [4, 6, 8] if formato == "Retangular" else [6, 8, 10])
-
-    with col2:
-        if st.button("Verificar Pilar"):
-            N_sd = N_k * 1.4
-            Ac = (b * h_p) if formato == "Retangular" else (math.pi * b**2) / 4
-            fyd = (500 / 1.15) / 10
-            As_min = max(0.15 * (N_sd / fyd), 0.004 * Ac)
-            As_max = 0.08 * Ac
-            
-            num_b, phi_b, a_real = otimizar_bitola(As_min, b, min_barras=num_barras)
-            if a_real > As_max: st.error("🚨 Seção Subdimensionada! O aço estrapolou os 8% permitidos.")
-            else: st.success(rf"✅ Adotar: **{num_b} barras de $\phi$ {phi_b} mm** (Área: {a_real:.2f} cm²)")
-            st.pyplot(plot_pilar_detalhe(formato, b, h_p, num_b))
-
-def modulo_lajes():
-    st.header("Módulo 3: Lajes Maciças")
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        lx = st.number_input("Vão lx (m)", min_value=1.0, value=4.0)
-        ly = st.number_input("Vão ly (m)", min_value=1.0, value=5.0)
-        q = st.number_input("Carga Total (kN/m²)", min_value=1.0, value=7.0)
-        h_l = st.number_input("Espessura h (cm)", min_value=7.0, value=10.0)
-
-    with col2:
-        if st.button("Calcular Laje"):
-            lam = ly / lx
-            M_x = (q * (lx**2)) / 8 if lam > 2.0 else (((ly**4)/(lx**4 + ly**4)) * q * (lx**2)) / 8
-            As = max((M_x * 1.4 * 100) / ((500/1.15)/10 * (h_l - 2.5) * 0.9), (0.15/100)*100*h_l)
-            st.success(rf"Armadura de Tração: **{As:.2f} cm²/m**")
-            st.pyplot(plot_laje_ruptura(lx, ly))
-
-def modulo_laje_trelicada():
-    st.header("Módulo 4: Lajes Treliçadas / Nervuradas (Seção T)")
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        L = st.number_input("Vão L (m) ", min_value=1.0, value=4.5)
-        q_l = st.number_input("Carga (kN/m²) ", min_value=1.0, value=5.0)
-        bf = st.number_input("Intereixo bf (cm) ", value=40.0)
-        bw = st.number_input("Sapata bw (cm) ", value=12.0)
-        h = st.number_input("Altura total h (cm) ", value=16.0)
-        hf = st.number_input("Capa hf (cm) ", value=4.0)
-
-    with col2:
-        if st.button("Calcular Nervura T"):
-            M_sd = (q_l * (bf/100) * 1.4 * (L**2)) / 8
-            d = h - 2.5
-            a_eq = 0.272 * bf * (25/1.4/10)
-            b_eq = -0.68 * bf * (25/1.4/10) * d
-            delta = b_eq**2 - 4 * a_eq * (M_sd * 100)
-            if delta < 0: st.error("Seção insuficiente.")
-            else:
-                x = (-b_eq - math.sqrt(delta)) / (2 * a_eq)
-                As = (M_sd * 100) / ((500/1.15)/10 * (d - 0.4 * x))
-                st.success(rf"Armadura por Vigota Requerida: **{As:.2f} cm²**")
-                st.pyplot(plot_secao_T(bf, bw, h, hf, d, x))
-
-def modulo_metalicas_mistas():
-    st.header("Módulo 5: Estruturas Metálicas e Vigas Mistas (FLT)")
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        tipo_perfil = st.selectbox("Tipo de Perfil", ["Perfil I Laminado/Soldado", "Perfil U Laminado"])
-        d_aco = st.number_input("Altura d (cm)", min_value=5.0, value=25.0)
-        bf_aco = st.number_input("Largura Mesa bf (cm)", min_value=5.0, value=12.5)
-        tw_aco = st.number_input("Espessura Alma tw (mm)", min_value=2.0, value=6.3) / 10 
-        tf_aco = st.number_input("Espessura Mesa tf (mm)", min_value=2.0, value=9.5) / 10 
-        aco_fy = st.selectbox("Tensão Escoamento", ["ASTM A36 (250 MPa)", "ASTM A572 (345 MPa)"])
-        fy = 25.0 if "250" in aco_fy else 34.5
-        viga_mista = st.checkbox("Considerar Laje de Concreto (Viga Mista)?")
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Godoy & Prado - Plataforma de Engenharia</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .hidden { display: none; }
+        .nav-btn { cursor: pointer; transition: all 0.2s ease-in-out; }
+        .nav-btn:hover { background-color: #112240; color: #C5A059; }
+        /* Cores baseadas na Logo Godoy & Prado: Azul Marinho #0A192F e Dourado #C5A059 */
+        .active-nav { background-color: #112240; color: #C5A059; border-left: 4px solid #C5A059; font-weight: 600; }
         
-        if viga_mista:
-            tc_concreto = st.number_input("Espessura Laje tc (cm)", min_value=5.0, value=10.0)
-            beff_concreto = st.number_input("Largura Efetiva beff (cm)", min_value=30.0, value=150.0)
-            fck_misto = st.number_input("fck Laje (MPa)", min_value=20.0, value=25.0)
-        else:
-            contida = st.radio("Contenção Lateral (FLT):", ["100% Contida", "Destravada"])
-            Lb = st.number_input("Lb (m)", min_value=0.1, value=3.0) * 100 if "Destravada" in contida else 0.0
+        details > summary { list-style: none; cursor: pointer; }
+        details > summary::-webkit-details-marker { display: none; }
+        
+        .tab-btn { cursor: pointer; transition: all 0.2s; }
+        .active-tab { border-bottom: 2px solid #C5A059; color: #0A192F; font-weight: bold; }
+        
+        /* Custom scrollbar para o menu lateral */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #1A2E4C; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #C5A059; }
+    </style>
+</head>
+<body class="bg-slate-50 font-sans flex h-screen overflow-hidden text-slate-800">
 
-    with col2:
-        if st.button("Calcular Resistência Aço"):
-            Area = 2 * (bf_aco * tf_aco) + (d_aco - 2*tf_aco) * tw_aco
-            h0 = d_aco - tf_aco 
-            Iy = 2 * (tf_aco * bf_aco**3)/12 + ((d_aco - 2*tf_aco) * tw_aco**3)/12
-            Ix = (bf_aco * d_aco**3)/12 - ((bf_aco - tw_aco) * (d_aco - 2*tf_aco)**3)/12
-            Wx = Ix / (d_aco/2)
-            Zx = bf_aco * tf_aco * h0 + (tw_aco * (d_aco - 2*tf_aco)**2)/4
-            J = (2 * bf_aco * tf_aco**3 + (d_aco - 2*tf_aco) * tw_aco**3)/3
-            Cw = (Iy * h0**2)/4 
-            ry = math.sqrt(Iy / Area)
-            Rs = Area * (fy / 1.10)
+    <aside class="w-64 bg-[#0A192F] border-r border-[#1A2E4C] flex flex-col h-full z-10 shadow-2xl">
+        
+        <div class="p-6 border-b border-[#1A2E4C] flex flex-col items-center justify-center bg-[#071324]">
+            <img src="image_d8ed05.png" alt="Logo Godoy & Prado" class="w-40 mb-2 drop-shadow-lg">
+        </div>
+
+        <nav class="flex-1 mt-4 overflow-y-auto">
+            <ul class="space-y-1">
+                <li onclick="showModule('mod-materiais', this)" class="nav-btn active-nav block px-6 py-3 text-sm text-slate-300">Orçamentação (ERP)</li>
+                <li onclick="showModule('mod-cargas', this)" class="nav-btn block px-6 py-3 text-sm text-slate-400">Descida de Cargas</li>
+                <li onclick="showModule('mod-vigas', this)" class="nav-btn block px-6 py-3 text-sm text-slate-400">Vigas (Gráficos)</li>
+            </ul>
+        </nav>
+
+        <div class="p-5 bg-[#071324] border-t border-[#1A2E4C]">
+            <h4 class="text-[#C5A059] text-xs font-bold uppercase tracking-wider mb-3 flex items-center">
+                <span class="mr-2">📚</span> Referências
+            </h4>
+            <ul class="text-[11px] text-slate-400 space-y-2 leading-tight">
+                <li>• <strong class="text-slate-300">NBR 6118:</strong> Proj. Estruturas de Concreto</li>
+                <li>• <strong class="text-slate-300">NBR 6120:</strong> Cargas para Cálculo</li>
+                <li>• <strong class="text-slate-300">NBR 8800:</strong> Estruturas de Aço / FLT</li>
+                <li>• <strong class="text-slate-300">Eurocode 4 / CBCA:</strong> Vigas Mistas</li>
+                <li>• <strong class="text-slate-300">Catálogos Gerdau:</strong> Perfis W e U</li>
+            </ul>
+        </div>
+    </aside>
+
+    <main class="flex-1 h-full overflow-y-auto p-8 lg:px-12 xl:px-20">
+
+        <section id="mod-materiais" class="module-section max-w-5xl mx-auto">
+            <div class="mb-8 border-b-2 border-[#C5A059] pb-4">
+                <h2 class="text-3xl font-extrabold text-[#0A192F] tracking-tight">Levantamento de Materiais</h2>
+                <p class="text-slate-500 mt-2">Selecione as etapas da obra e preencha a geometria para gerar o orçamento.</p>
+            </div>
             
-            if viga_mista:
-                fcd = (fck_misto / 1.4) / 10
-                Rc = 0.85 * fcd * beff_concreto * tc_concreto
-                if Rc >= Rs:
-                    a_comp = Rs / (0.85 * fcd * beff_concreto)
-                    pna_y = d_aco + tc_concreto - a_comp
-                    M_misto_Rd = Rs * ((d_aco / 2) + tc_concreto - (a_comp / 2))
-                else:
-                    Ra_comp = (Rs - Rc) / 2
-                    R_mesa_sup = (bf_aco * tf_aco) * (fy / 1.10)
-                    if Ra_comp <= R_mesa_sup: pna_y = d_aco - (Ra_comp / (bf_aco * (fy/1.10)))
-                    else: pna_y = d_aco - tf_aco - ((Ra_comp - R_mesa_sup) / (tw_aco * (fy/1.10)))
-                    M_misto_Rd = Rc * ((d_aco / 2) + (tc_concreto / 2)) + (Rs - Rc) * (d_aco/4)
-                st.success(rf"Momento Plástico Viga Mista: **{M_misto_Rd/100:.2f} kN.m**")
-                st.pyplot(plot_secao_mista(d_aco, bf_aco, tw_aco, tf_aco, tc_concreto, beff_concreto, pna_y))
-            else:
-                E, G = 20000.0, 7700.0
-                Mpl, Mr, Lp = Zx * fy, 0.7 * fy * Wx, 1.76 * ry * math.sqrt(E / fy)
-                if Lb <= 0: st.success(rf"Momento Plástico 100% Contido: **{Mpl/1.10/100:.2f} kN.m**")
-                else:
-                    L_low, L_high = Lp, 20000.0
-                    for _ in range(40):
-                        L_mid = (L_low + L_high)/2
-                        if calc_Mcr(L_mid, E, G, Iy, J, Cw, 1.0) > Mr: L_low = L_mid
-                        else: L_high = L_mid
-                    Lr = (L_low + L_high)/2
-                    Mcr = calc_Mcr(Lb, E, G, Iy, J, Cw, 1.0) 
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 mb-8 overflow-hidden">
+                
+                <div class="bg-slate-50 p-6 border-b border-slate-200 flex flex-wrap gap-6 items-center">
+                    <span class="text-sm font-semibold text-[#0A192F] uppercase tracking-wider">Calcular:</span>
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" id="chk_alv" checked onchange="toggleSection('sec_alv', this.checked)" class="form-checkbox h-5 w-5 text-[#C5A059] rounded border-slate-300 focus:ring-[#C5A059]">
+                        <span class="ml-2 text-slate-700 font-medium">Alvenaria</span>
+                    </label>
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" id="chk_fund" checked onchange="toggleSection('sec_fund', this.checked)" class="form-checkbox h-5 w-5 text-[#C5A059] rounded border-slate-300 focus:ring-[#C5A059]">
+                        <span class="ml-2 text-slate-700 font-medium">Fundações</span>
+                    </label>
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" id="chk_sup" checked onchange="toggleSection('sec_sup', this.checked)" class="form-checkbox h-5 w-5 text-[#C5A059] rounded border-slate-300 focus:ring-[#C5A059]">
+                        <span class="ml-2 text-slate-700 font-medium">Pilares e Vigas</span>
+                    </label>
+                </div>
+
+                <div class="p-6 space-y-8">
                     
-                    if Lb <= Lp: Mk = Mpl
-                    elif Lb <= Lr: Mk = min(Mpl - (Mpl - Mr) * ((Lb - Lp) / (Lr - Lp)), Mpl)
-                    else: Mk = min(Mcr, Mpl)
+                    <div id="sec_alv" class="space-y-4">
+                        <h3 class="text-lg font-bold text-[#0A192F] flex items-center"><span class="text-xl mr-2">🧱</span> Dimensões da Alvenaria</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div><label class="block text-xs font-semibold text-slate-500 mb-1">Pé-direito (m)</label><input type="number" id="m_pd" value="2.8" class="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg focus:ring-2 focus:ring-[#C5A059] outline-none transition"></div>
+                            <div><label class="block text-xs font-semibold text-slate-500 mb-1">Parede 1 Vez (Metro Linear)</label><input type="number" id="m_ml_1v" value="20.0" class="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg focus:ring-2 focus:ring-[#C5A059] outline-none transition"></div>
+                            <div><label class="block text-xs font-semibold text-slate-500 mb-1">Parede Meia Vez (Metro Linear)</label><input type="number" id="m_ml_mv" value="50.0" class="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-lg focus:ring-2 focus:ring-[#C5A059] outline-none transition"></div>
+                        </div>
+                    </div>
+
+                    <div id="sec_fund" class="space-y-4 border-t border-slate-100 pt-6">
+                        <h3 class="text-lg font-bold text-[#0A192F] flex items-center"><span class="text-xl mr-2">🕳️</span> Geometria das Estacas</h3>
+                        <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
+                            <div class="col-span-2 md:col-span-1"><label class="block text-xs font-semibold text-slate-500 mb-1">Quantidade</label><input type="number" id="e_qtd" value="20" class="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg outline-none focus:border-[#C5A059]"></div>
+                            <div class="col-span-2 md:col-span-1"><label class="block text-xs font-semibold text-slate-500 mb-1">Diâmetro (cm)</label><input type="number" id="e_diam" value="25.0" class="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg outline-none focus:border-[#C5A059]"></div>
+                            <div class="col-span-2 md:col-span-1"><label class="block text-xs font-semibold text-slate-500 mb-1">Profund. (m)</label><input type="number" id="e_prof" value="6.0" class="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg outline-none focus:border-[#C5A059]"></div>
+                            
+                            <div class="col-span-2 md:col-span-1"><label class="block text-xs font-semibold text-slate-500 mb-1">Qtd Aço Long.</label><input type="number" id="e_qtd_long" value="4" class="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg outline-none focus:border-[#C5A059]"></div>
+                            <div class="col-span-2 md:col-span-1"><label class="block text-xs font-semibold text-slate-500 mb-1">Esp. Estribo (cm)</label><input type="number" id="e_esp_est" value="15.0" class="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg outline-none focus:border-[#C5A059]"></div>
+                            <div class="col-span-2 md:col-span-1"><label class="block text-xs font-semibold text-slate-500 mb-1">Cobrimento (cm)</label><input type="number" id="e_cob" value="4.0" class="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg outline-none focus:border-[#C5A059]"></div>
+                            <input type="hidden" id="e_transp" value="40.0">
+                        </div>
+                    </div>
+
+                    <div id="sec_sup" class="space-y-6 border-t border-slate-100 pt-6">
+                        <h3 class="text-lg font-bold text-[#0A192F] flex items-center"><span class="text-xl mr-2">🏛️</span> Superestrutura</h3>
                         
-                    st.success(rf"Momento Resistente (FLT): **{Mk/1.10/100:.2f} kN.m**")
-                    st.pyplot(plot_curva_flt(Lp, Lr, Mpl, Mr, Lb, Mk/1.10, E, G, Iy, J, Cw))
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                            <div class="bg-white border-l-4 border-[#0A192F] rounded-r-xl p-5 shadow-sm bg-slate-50/50">
+                                <h4 class="font-bold text-[#0A192F] mb-3">Pilares</h4>
+                                <div class="grid grid-cols-3 gap-3 mb-3">
+                                    <div><label class="block text-xs text-slate-500 mb-1">Qtd</label><input type="number" id="p_qtd" value="12" class="w-full bg-white border border-slate-200 p-2 rounded-lg focus:border-[#C5A059] outline-none"></div>
+                                    <div><label class="block text-xs text-slate-500 mb-1">Comp. (m)</label><input type="number" id="p_comp" value="3.0" class="w-full bg-white border border-slate-200 p-2 rounded-lg focus:border-[#C5A059] outline-none"></div>
+                                    <div><label class="block text-xs text-slate-500 mb-1">Seção (cm)</label>
+                                        <div class="flex items-center space-x-1">
+                                            <input type="number" id="p_b" value="15" class="w-full bg-white border border-slate-200 p-2 rounded-lg text-center" title="Base">
+                                            <span class="text-slate-400">x</span>
+                                            <input type="number" id="p_h" value="30" class="w-full bg-white border border-slate-200 p-2 rounded-lg text-center" title="Altura">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3">
+                                    <div><label class="block text-xs text-slate-500 mb-1">Qtd Aço Long.</label><input type="number" id="p_qtd_long" value="4" class="w-full bg-white border border-slate-200 p-2 rounded-lg focus:border-[#C5A059] outline-none"></div>
+                                    <div><label class="block text-xs text-slate-500 mb-1">Esp. Estribo (cm)</label><input type="number" id="p_esp_est" value="15.0" class="w-full bg-white border border-slate-200 p-2 rounded-lg focus:border-[#C5A059] outline-none"></div>
+                                    <div><label class="block text-xs text-slate-500 mb-1">Cobrimento (cm)</label><input type="number" id="p_cob" value="3.0" class="w-full bg-white border border-slate-200 p-2 rounded-lg focus:border-[#C5A059] outline-none"></div>
+                                    <input type="hidden" id="p_transp" value="40.0">
+                                </div>
+                            </div>
 
-# ==========================================
-# NOVO MÓDULO 6: ORÇAMENTAÇÃO E QUANTITATIVOS COMPLETOS
-# ==========================================
-def modulo_materiais_avancado():
-    st.header("Módulo 6: Dimensionamento de Materiais e Insumos ERP")
-    st.markdown("---")
-    
-    with st.expander("📐 1. Dados Gerais e Alvenaria", expanded=True):
-        col1, col2, col3 = st.columns(3)
-        area_const = col1.number_input("Área Construída (m²)", min_value=0.0, value=100.0)
-        perimetro = col2.number_input("Perímetro da Área (m)", min_value=0.0, value=40.0)
-        pe_direito = col3.number_input("Pé-direito (m)", min_value=0.0, value=2.8)
-        
-        col4, col5 = st.columns(2)
-        ml_1_vez = col4.number_input("Parede 1 vez - Metro Linear (m)", min_value=0.0, value=20.0)
-        ml_meia_vez = col5.number_input("Parede Meia vez - Metro Linear (m)", min_value=0.0, value=50.0)
-        
-    with st.expander("🕳️ 2. Fundações (Estacas)"):
-        col_e1, col_e2, col_e3 = st.columns(3)
-        qtd_estacas = col_e1.number_input("Quantidade de Estacas", min_value=0, value=20)
-        diam_estaca = col_e2.number_input("Diâmetro da Estaca (cm)", min_value=10.0, value=25.0)
-        prof_estaca = col_e3.number_input("Profundidade (m)", min_value=0.0, value=6.0)
-        
-        col_e4, col_e5, col_e6 = st.columns(3)
-        bitola_long_est = col_e4.selectbox("Aço Long. Estaca", [10.0, 12.5, 16.0])
-        qtd_long_est = col_e5.number_input("Qtd Barras Long/Estaca", min_value=3, value=4)
-        bitola_estr_est = col_e6.selectbox("Aço Estribo Estaca", [5.0, 6.3, 8.0])
-        
-        col_e7, col_e8, col_e9 = st.columns(3)
-        espac_estribo_est = col_e7.number_input("Espaçamento Estribos (cm) ", min_value=5.0, value=15.0)
-        cob_est = col_e8.number_input("Cobrimento Estacas (cm)", min_value=1.0, value=4.0)
-        transp_est = col_e9.number_input("Transpasse Aço Estacas (cm)", min_value=10.0, value=40.0)
+                            <div class="bg-white border-l-4 border-[#C5A059] rounded-r-xl p-5 shadow-sm bg-slate-50/50">
+                                <h4 class="font-bold text-[#C5A059] mb-3">Vigas</h4>
+                                <div class="grid grid-cols-3 gap-3 mb-3">
+                                    <div><label class="block text-xs text-slate-500 mb-1">Qtd</label><input type="number" id="v_qtd" value="15" class="w-full bg-white border border-slate-200 p-2 rounded-lg focus:border-[#0A192F] outline-none"></div>
+                                    <div><label class="block text-xs text-slate-500 mb-1">Comp. Médio (m)</label><input type="number" id="v_comp" value="4.0" class="w-full bg-white border border-slate-200 p-2 rounded-lg focus:border-[#0A192F] outline-none"></div>
+                                    <div><label class="block text-xs text-slate-500 mb-1">Seção (cm)</label>
+                                        <div class="flex items-center space-x-1">
+                                            <input type="number" id="v_bw" value="15" class="w-full bg-white border border-slate-200 p-2 rounded-lg text-center" title="Base">
+                                            <span class="text-slate-400">x</span>
+                                            <input type="number" id="v_h" value="40" class="w-full bg-white border border-slate-200 p-2 rounded-lg text-center" title="Altura">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3">
+                                    <div><label class="block text-xs text-slate-500 mb-1">Qtd Aço Long.</label><input type="number" id="v_qtd_long" value="4" class="w-full bg-white border border-slate-200 p-2 rounded-lg focus:border-[#0A192F] outline-none"></div>
+                                    <div><label class="block text-xs text-slate-500 mb-1">Esp. Estribo (cm)</label><input type="number" id="v_esp_est" value="15.0" class="w-full bg-white border border-slate-200 p-2 rounded-lg focus:border-[#0A192F] outline-none"></div>
+                                    <div><label class="block text-xs text-slate-500 mb-1">Cobrimento (cm)</label><input type="number" id="v_cob" value="3.0" class="w-full bg-white border border-slate-200 p-2 rounded-lg focus:border-[#0A192F] outline-none"></div>
+                                    <input type="hidden" id="v_transp" value="20.0">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <details class="bg-slate-50 rounded-xl border border-slate-200 group transition-all">
+                        <summary class="flex justify-between items-center font-semibold p-4 text-[#0A192F] hover:text-[#C5A059] cursor-pointer">
+                            <span class="flex items-center"><span class="text-xl mr-2">⚙️</span> Configurações Avançadas (Preços e Traços)</span>
+                            <span class="transition group-open:rotate-180">▼</span>
+                        </summary>
+                        <div class="p-6 border-t border-slate-200 space-y-6">
+                            
+                            <div class="flex gap-8 border-b pb-4 border-slate-200">
+                                <div>
+                                    <label class="block text-xs font-bold text-slate-500 mb-2 uppercase">Aço Comercial</label>
+                                    <select id="cfg_barra" class="bg-white border border-slate-300 p-2 rounded text-sm focus:border-[#C5A059] outline-none">
+                                        <option value="12">Barras de 12 metros</option>
+                                        <option value="6">Barras de 6 metros</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-slate-500 mb-2 uppercase">Preparo do Concreto</label>
+                                    <select id="tipo_concreto" onchange="toggleConcreto(this.value)" class="bg-white border border-slate-300 p-2 rounded text-sm focus:border-[#C5A059] outline-none">
+                                        <option value="virado">Virado na Obra</option>
+                                        <option value="usinado">Usinado (Concreteira)</option>
+                                    </select>
+                                </div>
+                            </div>
 
-    with st.expander("🏛️ 3. Superestrutura (Pilares e Vigas)"):
-        st.markdown("**Pilares**")
-        col_p1, col_p2, col_p3 = st.columns(3)
-        qtd_pil = col_p1.number_input("Qtd Pilares", min_value=0, value=12)
-        b_pil = col_p2.number_input("Base Pilar (cm)", min_value=14.0, value=15.0)
-        h_pil = col_p3.number_input("Altura Pilar (cm)", min_value=14.0, value=30.0)
-        comp_pil = st.number_input("Comprimento Pilar (m)", min_value=0.0, value=3.0)
-        
-        col_p4, col_p5, col_p6 = st.columns(3)
-        qtd_long_pil = col_p4.number_input("Qtd Barras Long/Pilar", min_value=4, value=4)
-        espac_estribo_pil = col_p5.number_input("Espaç. Estribos Pilar (cm)", min_value=5.0, value=15.0)
-        cob_pil = col_p6.number_input("Cobrimento Pilares (cm)", min_value=1.0, value=3.0)
-        transp_pil = st.number_input("Transpasse Aço Pilar (cm)", min_value=10.0, value=40.0)
+                            <div>
+                                <h4 class="text-sm font-bold text-[#0A192F] mb-3">Traços Volumétricos (Cimento : Cal : Areia)</h4>
+                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    <div class="bg-white p-3 rounded border border-slate-200">
+                                        <span class="text-xs text-slate-400 block mb-2 font-bold">Assentamento</span>
+                                        <div class="flex space-x-1"><input type="number" id="a_cim" value="1.0" class="w-full text-center border rounded p-1 text-sm"><input type="number" id="a_cal" value="0.5" class="w-full text-center border rounded p-1 text-sm"><input type="number" id="a_ar" value="6.0" class="w-full text-center border rounded p-1 text-sm"></div>
+                                    </div>
+                                    <div class="bg-white p-3 rounded border border-slate-200">
+                                        <span class="text-xs text-slate-400 block mb-2 font-bold">Reboco</span>
+                                        <div class="flex space-x-1"><input type="number" id="r_cim" value="1.0" class="w-full text-center border rounded p-1 text-sm"><input type="number" id="r_cal" value="1.0" class="w-full text-center border rounded p-1 text-sm"><input type="number" id="r_ar" value="6.0" class="w-full text-center border rounded p-1 text-sm"></div>
+                                    </div>
+                                    <div class="bg-white p-3 rounded border border-slate-200">
+                                        <span class="text-xs text-slate-400 block mb-2 font-bold">Chapisco</span>
+                                        <div class="flex space-x-1"><input type="number" id="c_cim" value="1.0" class="w-full text-center border rounded p-1 text-sm"><input type="number" id="c_cal" value="0.0" class="w-full text-center border rounded p-1 text-sm"><input type="number" id="c_ar" value="3.0" class="w-full text-center border rounded p-1 text-sm"></div>
+                                    </div>
+                                    <div id="box-concreto-obra" class="bg-white p-3 rounded border border-slate-200 border-l-2 border-l-[#C5A059]">
+                                        <span class="text-xs text-[#0A192F] block mb-2 font-bold">Concreto (Cim : Ar : Br)</span>
+                                        <div class="flex space-x-1"><input type="number" id="co_cim" value="1.0" class="w-full text-center border rounded p-1 text-sm"><input type="number" id="co_ar" value="2.0" class="w-full text-center border rounded p-1 text-sm"><input type="number" id="co_br" value="3.0" class="w-full text-center border rounded p-1 text-sm"></div>
+                                    </div>
+                                    <div id="box-concreto-usinado" class="hidden bg-white p-3 rounded border border-slate-200 col-span-1 border-l-2 border-l-[#C5A059]">
+                                        <span class="text-xs text-[#0A192F] block mb-2 font-bold">Concreto Usinado</span>
+                                        <select id="cfg_fck" class="w-full border rounded p-1.5 text-sm"><option value="20">FCK 20 MPa</option><option value="25" selected>FCK 25 MPa</option><option value="30">FCK 30 MPa</option></select>
+                                    </div>
+                                </div>
+                            </div>
 
-        st.markdown("**Vigas**")
-        col_v1, col_v2, col_v3 = st.columns(3)
-        qtd_vig = col_v1.number_input("Qtd Vigas", min_value=0, value=15)
-        bw_vig = col_v2.number_input("Base Viga (cm)", min_value=10.0, value=15.0)
-        h_vig = col_v3.number_input("Altura Viga (cm)", min_value=15.0, value=40.0)
-        comp_vig = st.number_input("Comprimento Médio Viga (m)", min_value=0.0, value=4.0)
-        
-        col_v4, col_v5, col_v6 = st.columns(3)
-        qtd_long_vig = col_v4.number_input("Qtd Barras Long/Viga", min_value=2, value=4)
-        espac_estribo_vig = col_v5.number_input("Espaç. Estribos Viga (cm)", min_value=5.0, value=15.0)
-        cob_vig = col_v6.number_input("Cobrimento Vigas (cm)", min_value=1.0, value=3.0)
-        transp_vig = st.number_input("Transpasse Aço Viga (cm) / Ganchos", min_value=5.0, value=20.0)
+                            <div>
+                                <h4 class="text-sm font-bold text-[#0A192F] mb-3">Tabela de Preços Unitários (R$)</h4>
+                                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+                                    <div><label class="text-[10px] text-slate-500">Tijolo 1Vz</label><input type="number" id="pr_t1v" value="1.20" step="0.1" class="w-full border p-1 rounded text-sm text-center focus:border-[#C5A059] outline-none"></div>
+                                    <div><label class="text-[10px] text-slate-500">Tijolo MVz</label><input type="number" id="pr_tmv" value="0.80" step="0.1" class="w-full border p-1 rounded text-sm text-center focus:border-[#C5A059] outline-none"></div>
+                                    <div><label class="text-[10px] text-slate-500">Cim 50kg</label><input type="number" id="pr_cim" value="35.00" class="w-full border p-1 rounded text-sm text-center focus:border-[#C5A059] outline-none"></div>
+                                    <div><label class="text-[10px] text-slate-500">Cal 20kg</label><input type="number" id="pr_cal" value="15.00" class="w-full border p-1 rounded text-sm text-center focus:border-[#C5A059] outline-none"></div>
+                                    <div><label class="text-[10px] text-slate-500">Areia m³</label><input type="number" id="pr_ar" value="120.00" class="w-full border p-1 rounded text-sm text-center focus:border-[#C5A059] outline-none"></div>
+                                    <div><label class="text-[10px] text-slate-500">Brita m³</label><input type="number" id="pr_br" value="110.00" class="w-full border p-1 rounded text-sm text-center focus:border-[#C5A059] outline-none"></div>
+                                    <div><label class="text-[10px] text-slate-500">Aço Fino/Br</label><input type="number" id="pr_af" value="25.00" class="w-full border p-1 rounded text-sm text-center focus:border-[#C5A059] outline-none"></div>
+                                    <div><label class="text-[10px] text-slate-500">Aço Gros/Br</label><input type="number" id="pr_ag" value="60.00" class="w-full border p-1 rounded text-sm text-center focus:border-[#C5A059] outline-none"></div>
+                                </div>
+                                <div id="preco_usinado_box" class="hidden mt-3 w-1/4">
+                                    <label class="text-[10px] text-[#C5A059] font-bold">Preço Concreto Usinado (m³)</label>
+                                    <input type="number" id="pr_conc" value="450.00" class="w-full border p-1 rounded text-sm text-center border-[#C5A059] outline-none">
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+                
+                <div class="bg-slate-50 p-6 border-t border-slate-200">
+                    <button onclick="processarERP()" class="w-full md:w-auto px-10 py-4 bg-[#0A192F] hover:bg-[#112240] text-[#C5A059] border border-[#C5A059] font-bold rounded-xl shadow-md transition-all text-lg flex items-center justify-center mx-auto">
+                        <span class="mr-2">📄</span> Gerar Relatório e Orçamento
+                    </button>
+                </div>
+            </div>
 
-    with st.expander("⚙️ 4. Insumos, Traços e Preços"):
-        col_i1, col_i2, col_i3 = st.columns(3)
-        comp_barra = col_i1.radio("Tamanho Padrão da Barra de Aço", [12.0, 6.0])
-        fck_esc = col_i2.selectbox("FCK Estrutural (Concreto)", [20, 25, 30, 35])
-        traco_arg = col_i3.selectbox("Traço Argamassa/Chapisco (Cimento:Areia)", [3, 4, 5, 6], index=3, help="Ex: 6 significa 1 parte cimento para 6 de areia.")
-        
-        st.markdown("### Tabela de Preços Unitários (R$)")
-        col_pr1, col_pr2, col_pr3, col_pr4 = st.columns(4)
-        pr_tij_1v = col_pr1.number_input("Tijolo 1 Vez (un)", value=1.20)
-        pr_tij_m = col_pr2.number_input("Tijolo Meia Vez (un)", value=0.80)
-        pr_cimento = col_pr3.number_input("Saco Cimento 50kg", value=35.00)
-        pr_areia = col_pr4.number_input("Areia (m³)", value=120.00)
-        
-        col_pr5, col_pr6, col_pr7, col_pr8 = st.columns(4)
-        pr_brita = col_pr5.number_input("Brita (m³)", value=110.00)
-        pr_aco_fino = col_pr6.number_input("Aço Fino (Estribo) / Barra", value=25.00)
-        pr_aco_grosso = col_pr7.number_input("Aço Grosso (Longit.) / Barra", value=60.00)
+            <div id="res-erp" class="hidden">
+                <h3 class="text-2xl font-bold text-[#0A192F] mb-6">Orçamento Godoy & Prado</h3>
+                
+                <div class="bg-white rounded-xl shadow-sm border border-[#C5A059] overflow-hidden">
+                    <table class="min-w-full divide-y divide-slate-200">
+                        <thead class="bg-[#0A192F] text-[#C5A059]">
+                            <tr>
+                                <th class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider">Item / Material</th>
+                                <th class="px-6 py-4 text-right text-xs font-bold uppercase tracking-wider">Qtd Necessária</th>
+                                <th class="px-6 py-4 text-right text-xs font-bold uppercase tracking-wider">Custo (R$)</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-slate-100 text-sm text-slate-700" id="tabela-orcamento">
+                            </tbody>
+                        <tfoot class="bg-[#0A192F] text-white">
+                            <tr>
+                                <td colspan="2" class="px-6 py-5 text-right font-semibold">Custo Total Estimado:</td>
+                                <td class="px-6 py-5 text-right font-black text-2xl text-[#C5A059]" id="out-custo-total">R$ 0,00</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
 
-    if st.button("📊 Processar Quantitativos e Gerar Orçamento Completo", type="primary"):
-        # 1. CÁLCULO DE ALVENARIA (Tijolos)
-        area_1v = ml_1_vez * pe_direito
-        area_mv = ml_meia_vez * pe_direito
-        
-        qtd_tij_1v = math.ceil(area_1v * 38.45) # Regra do usuário
-        qtd_tij_mv = math.ceil(area_mv * 25.0)  # Regra do usuário
-        
-        # 2. VOLUMES DE ARGAMASSA E CHAPISCO
-        # Estimativas médias: Assentamento 1 vez = 3cm, meia vez = 1.5cm
-        vol_assent_1v = area_1v * 0.03
-        vol_assent_mv = area_mv * 0.015
-        vol_assent_total = vol_assent_1v + vol_assent_mv
-        
-        # Chapisco (0.5cm) e Revestimento (2cm) em ambas as faces da parede
-        area_total_parede = area_1v + area_mv
-        vol_chapisco = (area_total_parede * 2) * 0.005
-        vol_revestimento = (area_total_parede * 2) * 0.02
-        vol_argamassas_total = vol_assent_total + vol_chapisco + vol_revestimento
-        
-        # 3. CÁLCULO DE FUNDAÇÕES (Estacas)
-        vol_conc_estacas = qtd_estacas * (math.pi * ((diam_estaca/100)/2)**2) * prof_estaca
-        
-        comp_estribo_est_unit = (math.pi * ((diam_estaca - 2*cob_est)/100)) + (2 * transp_est/100)
-        qtd_estribos_por_estaca = math.ceil((prof_estaca * 100) / espac_estribo_est)
-        comp_estribo_est_total = comp_estribo_est_unit * qtd_estribos_por_estaca * qtd_estacas
-        
-        comp_long_est_unit = prof_estaca + (transp_est/100)
-        comp_long_est_total = comp_long_est_unit * qtd_long_est * qtd_estacas
-        
-        # 4. CÁLCULO DE PILARES
-        vol_conc_pilares = qtd_pil * (b_pil/100) * (h_pil/100) * comp_pil
-        
-        comp_estribo_pil_unit = 2*((b_pil - 2*cob_pil)/100) + 2*((h_pil - 2*cob_pil)/100) + (2 * transp_pil/100)
-        qtd_estribos_por_pilar = math.ceil((comp_pil * 100) / espac_estribo_pil)
-        comp_estribo_pil_total = comp_estribo_pil_unit * qtd_estribos_por_pilar * qtd_pil
-        
-        comp_long_pil_unit = comp_pil + (transp_pil/100)
-        comp_long_pil_total = comp_long_pil_unit * qtd_long_pil * qtd_pil
-        
-        # 5. CÁLCULO DE VIGAS
-        vol_conc_vigas = qtd_vig * (bw_vig/100) * (h_vig/100) * comp_vig
-        
-        comp_estribo_vig_unit = 2*((bw_vig - 2*cob_vig)/100) + 2*((h_vig - 2*cob_vig)/100) + (2 * transp_vig/100)
-        qtd_estribos_por_viga = math.ceil((comp_vig * 100) / espac_estribo_vig)
-        comp_estribo_vig_total = comp_estribo_vig_unit * qtd_estribos_por_viga * qtd_vig
-        
-        comp_long_vig_unit = comp_vig + (transp_vig/100)
-        comp_long_vig_total = comp_long_vig_unit * qtd_long_vig * qtd_vig
-        
-        # Consolidação de Aço e Concreto
-        vol_concreto_total = vol_conc_estacas + vol_conc_pilares + vol_conc_vigas
-        comp_total_estribos = comp_estribo_est_total + comp_estribo_pil_total + comp_estribo_vig_total
-        comp_total_longit = comp_long_est_total + comp_long_pil_total + comp_long_vig_total
-        
-        barras_fino = math.ceil(comp_total_estribos / comp_barra)
-        barras_grosso = math.ceil(comp_total_longit / comp_barra)
-        
-        # 6. INSUMOS (Deduções Lógicas)
-        # Regra do Usuário: Vol Areia = Vol Argamassas + Chapisco
-        vol_areia_arg = vol_argamassas_total
-        
-        # Cimento para argamassas (Cimento = Areia / Traço)
-        # Assumindo 1200kg por m3 de cimento
-        kg_cimento_arg = (vol_areia_arg / traco_arg) * 1200
-        
-        # Concreto FCK -> Consumo Típico por m³
-        mapa_fck = {20: (300, 0.5, 0.8), 25: (350, 0.5, 0.8), 30: (400, 0.45, 0.8), 35: (450, 0.45, 0.8)}
-        cim_kg_m3, ar_m3_m3, br_m3_m3 = mapa_fck[fck_esc]
-        
-        kg_cimento_conc = vol_concreto_total * cim_kg_m3
-        vol_areia_conc = vol_concreto_total * ar_m3_m3
-        vol_brita_total = vol_concreto_total * br_m3_m3
-        
-        total_kg_cimento = kg_cimento_arg + kg_cimento_conc
-        sacos_cimento = math.ceil(total_kg_cimento / 50)
-        vol_areia_total = vol_areia_arg + vol_areia_conc
-        
-        # 7. CUSTOS TOTAIS
-        custo_tij_1v = qtd_tij_1v * pr_tij_1v
-        custo_tij_mv = qtd_tij_mv * pr_tij_m
-        custo_cimento = sacos_cimento * pr_cimento
-        custo_areia = vol_areia_total * pr_areia
-        custo_brita = vol_brita_total * pr_brita
-        custo_aco_fino = barras_fino * pr_aco_fino
-        custo_aco_grosso = barras_grosso * pr_aco_grosso
-        
-        custo_total_geral = (custo_tij_1v + custo_tij_mv + custo_cimento + 
-                             custo_areia + custo_brita + custo_aco_fino + custo_aco_grosso)
+                <details class="mt-6 text-sm text-slate-500">
+                    <summary class="cursor-pointer hover:text-[#C5A059]">Ver detalhamento de cálculo (Metragens e Volumes)</summary>
+                    <div class="p-4 bg-white border rounded mt-2 grid grid-cols-2 md:grid-cols-4 gap-4" id="detalhes_finais"></div>
+                </details>
+            </div>
+        </section>
 
-        # ==================================
-        # APRESENTAÇÃO DOS DADOS NO DASHBOARD
-        # ==================================
-        st.markdown("### 📋 Relatório de Quantitativos")
-        
-        tab_a, tab_b, tab_c, tab_d = st.tabs(["🧱 Alvenaria & Argamassas", "⚙️ Aço e Ferragem", "🏗️ Concreto", "💰 Orçamento Final"])
-        
-        with tab_a:
-            st.write(rf"**Tijolos de 1 Vez (38,45 un/m²):** {qtd_tij_1v} unidades (Área: {area_1v:.2f} m²)")
-            st.write(rf"**Tijolos de Meia Vez (25 un/m²):** {qtd_tij_mv} unidades (Área: {area_mv:.2f} m²)")
-            st.write("---")
-            st.write(rf"**Volume Argamassa Assentamento:** {vol_assent_total:.2f} m³")
-            st.write(rf"**Volume Chapisco (Ambas faces):** {vol_chapisco:.2f} m³")
-            st.write(rf"**Volume Revestimento (Ambas faces):** {vol_revestimento:.2f} m³")
-            st.success(rf"**Volume Total de Areia p/ Argamassas:** {vol_areia_arg:.2f} m³")
+        <section id="mod-cargas" class="module-section hidden max-w-3xl mx-auto">
+            <h2 class="text-3xl font-extrabold text-[#0A192F] mb-8 border-b-2 border-[#C5A059] pb-2">Descida de Cargas</h2>
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <label class="block text-sm text-slate-600 mb-1">Área da Planta (m²)</label>
+                <input type="number" id="c_area" value="100" class="w-full border p-2.5 rounded-lg mb-4 bg-slate-50 outline-none focus:border-[#C5A059]">
+                <label class="block text-sm text-slate-600 mb-1">Qtd Pilares</label>
+                <input type="number" id="c_pilares" value="8" class="w-full border p-2.5 rounded-lg mb-6 bg-slate-50 outline-none focus:border-[#C5A059]">
+                <button onclick="calcCargas()" class="w-full bg-[#0A192F] text-[#C5A059] hover:bg-[#112240] font-bold py-3 rounded-lg transition border border-[#C5A059]">Calcular</button>
+                <div id="res-cargas" class="mt-6 p-4 bg-[#0A192F] border border-[#C5A059] rounded-lg hidden">
+                    <p class="text-sm text-slate-300">Carga Axial de Serviço (Nk) p/ Pilar:</p>
+                    <p class="text-3xl font-bold text-[#C5A059]" id="out-nk"></p>
+                </div>
+            </div>
+        </section>
+
+        <section id="mod-vigas" class="module-section hidden max-w-3xl mx-auto text-center py-20">
+            <h2 class="text-3xl font-extrabold text-[#0A192F] mb-4">Módulo de Vigas</h2>
+            <p class="text-slate-500">Para a versão local completa com os gráficos de flexão (Chart.js), implemente as rotas visuais conforme o módulo anterior Python/JS.</p>
+        </section>
+
+    </main>
+
+    <script>
+        function showModule(moduleId, element) {
+            document.querySelectorAll('.module-section').forEach(el => el.classList.add('hidden'));
+            document.getElementById(moduleId).classList.remove('hidden');
+            document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active-nav'));
+            element.classList.add('active-nav');
+        }
+
+        function toggleSection(secId, isChecked) {
+            const el = document.getElementById(secId);
+            if(isChecked) { el.classList.remove('hidden'); } else { el.classList.add('hidden'); }
+        }
+
+        function toggleConcreto(tipo) {
+            if(tipo === 'usinado') {
+                document.getElementById('box-concreto-obra').classList.add('hidden');
+                document.getElementById('box-concreto-usinado').classList.remove('hidden');
+                document.getElementById('preco_usinado_box').classList.remove('hidden');
+            } else {
+                document.getElementById('box-concreto-obra').classList.remove('hidden');
+                document.getElementById('box-concreto-usinado').classList.add('hidden');
+                document.getElementById('preco_usinado_box').classList.add('hidden');
+            }
+        }
+
+        function processarERP() {
+            const c_alv = document.getElementById('chk_alv').checked;
+            const c_fund = document.getElementById('chk_fund').checked;
+            const c_sup = document.getElementById('chk_sup').checked;
+            const t_conc = document.getElementById('tipo_concreto').value;
+            const comp_barra = parseFloat(document.getElementById('cfg_barra').value);
+
+            let tot_cim_sacos = 0, tot_cal_sacos = 0, tot_ar_m3 = 0, tot_br_m3 = 0;
+            let qtd_1v = 0, qtd_mv = 0, vol_conc = 0, m_estribos = 0, m_longit = 0;
+
+            function calcTraco(vol, cim, cal, ar) {
+                if(vol<=0 || ar==0) return {c:0, k:0, a:0};
+                let vp = vol / ar;
+                return { c: Math.ceil((vp*cim)/0.036), k: Math.ceil((vp*cal)/0.036), a: vol };
+            }
+
+            if(c_alv) {
+                let pd = parseFloat(document.getElementById('m_pd').value);
+                let ml_1v = parseFloat(document.getElementById('m_ml_1v').value);
+                let ml_mv = parseFloat(document.getElementById('m_ml_mv').value);
+                let area_1v = ml_1v * pd;
+                let area_mv = ml_mv * pd;
+                qtd_1v = Math.ceil(area_1v * 38.45);
+                qtd_mv = Math.ceil(area_mv * 25.0);
+
+                let v_ass = (area_1v * 0.03) + (area_mv * 0.015);
+                let v_chap = (area_1v + area_mv) * 2 * 0.005;
+                let v_rev = (area_1v + area_mv) * 2 * 0.02;
+
+                let rA = calcTraco(v_ass, parseFloat(document.getElementById('a_cim').value), parseFloat(document.getElementById('a_cal').value), parseFloat(document.getElementById('a_ar').value));
+                let rC = calcTraco(v_chap, parseFloat(document.getElementById('c_cim').value), parseFloat(document.getElementById('c_cal').value), parseFloat(document.getElementById('c_ar').value));
+                let rR = calcTraco(v_rev, parseFloat(document.getElementById('r_cim').value), parseFloat(document.getElementById('r_cal').value), parseFloat(document.getElementById('r_ar').value));
+
+                tot_cim_sacos += rA.c + rC.c + rR.c;
+                tot_cal_sacos += rA.k + rC.k + rR.k;
+                tot_ar_m3 += rA.a + rC.a + rR.a;
+            }
+
+            if(c_fund) {
+                let q = parseFloat(document.getElementById('e_qtd').value);
+                let prof = parseFloat(document.getElementById('e_prof').value);
+                let d = parseFloat(document.getElementById('e_diam').value)/100;
+                let cob = parseFloat(document.getElementById('e_cob').value)/100;
+                let esp = parseFloat(document.getElementById('e_esp_est').value)/100;
+                let ql = parseFloat(document.getElementById('e_qtd_long').value);
+                let tr = 0.4;
+                vol_conc += q * (Math.PI * Math.pow(d/2, 2)) * prof;
+                m_estribos += ((Math.PI * (d - 2*cob)) + (2*tr)) * Math.ceil(prof/esp) * q;
+                m_longit += (prof + tr) * ql * q;
+            }
+
+            if(c_sup) {
+                let pq = parseFloat(document.getElementById('p_qtd').value);
+                let pc = parseFloat(document.getElementById('p_comp').value);
+                let pb = parseFloat(document.getElementById('p_b').value)/100;
+                let ph = parseFloat(document.getElementById('p_h').value)/100;
+                let pco = parseFloat(document.getElementById('p_cob').value)/100;
+                let pes = parseFloat(document.getElementById('p_esp_est').value)/100;
+                let pql = parseFloat(document.getElementById('p_qtd_long').value);
+                let ptr = 0.4;
+                vol_conc += pq * pb * ph * pc;
+                m_estribos += (2*(pb-2*pco) + 2*(ph-2*pco) + 2*ptr) * Math.ceil(pc/pes) * pq;
+                m_longit += (pc + ptr) * pql * pq;
+
+                let vq = parseFloat(document.getElementById('v_qtd').value);
+                let vc = parseFloat(document.getElementById('v_comp').value);
+                let vb = parseFloat(document.getElementById('v_bw').value)/100;
+                let vh = parseFloat(document.getElementById('v_h').value)/100;
+                let vco = parseFloat(document.getElementById('v_cob').value)/100;
+                let ves = parseFloat(document.getElementById('v_esp_est').value)/100;
+                let vql = parseFloat(document.getElementById('v_qtd_long').value);
+                let vtr = 0.2;
+                vol_conc += vq * vb * vh * vc;
+                m_estribos += (2*(vb-2*vco) + 2*(vh-2*vco) + 2*vtr) * Math.ceil(vc/ves) * vq;
+                m_longit += (vc + vtr) * vql * vq;
+            }
+
+            let br_fin = Math.ceil(m_estribos / comp_barra) || 0;
+            let br_gro = Math.ceil(m_longit / comp_barra) || 0;
+
+            if(t_conc === 'virado' && vol_conc > 0) {
+                let v_seco = vol_conc * 1.5;
+                let tc = parseFloat(document.getElementById('co_cim').value);
+                let ta = parseFloat(document.getElementById('co_ar').value);
+                let tb = parseFloat(document.getElementById('co_br').value);
+                let vp = v_seco / (tc + ta + tb);
+                tot_cim_sacos += Math.ceil((vp*tc)/0.036);
+                tot_ar_m3 += vp * ta;
+                tot_br_m3 += vp * tb;
+            }
+
+            let custo_total = 0;
+            let tb = document.getElementById('tabela-orcamento');
+            tb.innerHTML = '';
             
-        with tab_b:
-            st.markdown("**Armadura Transversal (Estribos)**")
-            st.write(f"- Estacas: {comp_estribo_est_unit:.2f}m (Unit) | {comp_estribo_est_total:.2f}m (Total)")
-            st.write(f"- Pilares: {comp_estribo_pil_unit:.2f}m (Unit) | {comp_estribo_pil_total:.2f}m (Total)")
-            st.write(f"- Vigas: {comp_estribo_vig_unit:.2f}m (Unit) | {comp_estribo_vig_total:.2f}m (Total)")
-            st.success(f"Necessidade de Aço Fino: **{barras_fino} Barras de {comp_barra}m**")
-            
-            st.markdown("**Armadura Longitudinal**")
-            st.write(f"- Estacas: {comp_long_est_unit:.2f}m (Unit) | {comp_long_est_total:.2f}m (Total)")
-            st.write(f"- Pilares: {comp_long_pil_unit:.2f}m (Unit) | {comp_long_pil_total:.2f}m (Total)")
-            st.write(f"- Vigas: {comp_long_vig_unit:.2f}m (Unit) | {comp_long_vig_total:.2f}m (Total)")
-            st.success(f"Necessidade de Aço Grosso: **{barras_grosso} Barras de {comp_barra}m**")
-            
-        with tab_c:
-            st.write(rf"- Volume de Estacas: **{vol_conc_estacas:.2f} m³**")
-            st.write(rf"- Volume de Pilares: **{vol_conc_pilares:.2f} m³**")
-            st.write(rf"- Volume de Vigas: **{vol_conc_vigas:.2f} m³**")
-            st.success(rf"Volume Total de Concreto Estrutural: **{vol_concreto_total:.2f} m³**")
-            
-        with tab_d:
-            df_orcamento = pd.DataFrame({
-                "Material": ["Tijolo 1 Vez", "Tijolo Meia Vez", "Cimento 50kg", "Areia", "Brita", "Aço Fino (Estribo)", "Aço Grosso (Longit)"],
-                "Quantidade Total": [f"{qtd_tij_1v} un", f"{qtd_tij_mv} un", f"{sacos_cimento} sacos", f"{vol_areia_total:.2f} m³", f"{vol_brita_total:.2f} m³", f"{barras_fino} barras", f"{barras_grosso} barras"],
-                "Custo Estimado (R$)": [custo_tij_1v, custo_tij_mv, custo_cimento, custo_areia, custo_brita, custo_aco_fino, custo_aco_grosso]
-            })
-            
-            st.table(df_orcamento.style.format({"Custo Estimado (R$)": "R$ {:.2f}"}))
-            st.markdown(f"### 💸 Custo Total de Materiais: **R$ {custo_total_geral:,.2f}**")
+            function addRow(nome, qtd, unid, preco) {
+                if(qtd > 0) {
+                    let cst = qtd * preco;
+                    custo_total += cst;
+                    tb.innerHTML += `<tr class="hover:bg-slate-50 transition"><td class="px-6 py-3 font-medium">${nome}</td><td class="px-6 py-3 text-right">${qtd.toLocaleString('pt-BR', {maximumFractionDigits:2})} ${unid}</td><td class="px-6 py-3 text-right font-semibold text-slate-600">R$ ${cst.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2})}</td></tr>`;
+                }
+            }
 
-# ==========================================
-# MENU LATERAL E NAVEGAÇÃO
-# ==========================================
-st.sidebar.title("Navegação do Edifício")
-modulo = st.sidebar.radio("Selecione o Componente:", [
-    "0. Cargas (NBR 6120)", 
-    "1. Vigas CA (Flexão/Cortante)", 
-    "2. Pilares CA (Variantes)", 
-    "3. Lajes Maciças", 
-    "4. Lajes Treliçadas",
-    "5. Metálicas e Vigas Mistas",
-    "6. Materiais ERP (Quantitativos)"
-])
+            addRow('Tijolo 1 Vez', qtd_1v, 'unid', parseFloat(document.getElementById('pr_t1v').value));
+            addRow('Tijolo Meia Vez', qtd_mv, 'unid', parseFloat(document.getElementById('pr_tmv').value));
+            addRow('Cimento (50kg)', tot_cim_sacos, 'sacos', parseFloat(document.getElementById('pr_cim').value));
+            addRow('Cal (20kg)', tot_cal_sacos, 'sacos', parseFloat(document.getElementById('pr_cal').value));
+            addRow('Areia', tot_ar_m3, 'm³', parseFloat(document.getElementById('pr_ar').value));
+            addRow('Brita', tot_br_m3, 'm³', parseFloat(document.getElementById('pr_br').value));
+            addRow(`Aço Fino (${comp_barra}m)`, br_fin, 'barras', parseFloat(document.getElementById('pr_af').value));
+            addRow(`Aço Grosso (${comp_barra}m)`, br_gro, 'barras', parseFloat(document.getElementById('pr_ag').value));
+            
+            if(t_conc === 'usinado' && vol_conc > 0) {
+                addRow('Concreto Usinado', vol_conc, 'm³', parseFloat(document.getElementById('pr_conc').value));
+            }
 
-if "0." in modulo: modulo_cargas()
-elif "1." in modulo: modulo_vigas()
-elif "2." in modulo: modulo_pilares()
-elif "3." in modulo: modulo_lajes()
-elif "4." in modulo: modulo_laje_trelicada()
-elif "5." in modulo: modulo_metalicas_mistas()
-else: modulo_materiais_avancado()
+            document.getElementById('out-custo-total').innerText = `R$ ${custo_total.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+            document.getElementById('detalhes_finais').innerHTML = `
+                <div><span class="block text-xs">Vol Concreto Total</span><strong>${vol_conc.toFixed(2)} m³</strong></div>
+                <div><span class="block text-xs">Metragem Estribos</span><strong>${m_estribos.toFixed(2)} m</strong></div>
+                <div><span class="block text-xs">Metragem Longit.</span><strong>${m_longit.toFixed(2)} m</strong></div>
+            `;
+            document.getElementById('res-erp').classList.remove('hidden');
+        }
+
+        function calcCargas() {
+            let a = parseFloat(document.getElementById('c_area').value);
+            let p = parseInt(document.getElementById('c_pilares').value);
+            document.getElementById('out-nk').innerText = (((a * 7) / p) * 1.15).toFixed(2) + ' kN';
+            document.getElementById('res-cargas').classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
